@@ -2,31 +2,22 @@ import streamlit as st
 import google.generativeai as genai
 import PyPDF2
 from PIL import Image
+import io
+import time
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="StudyBot: AI Maxxing", layout="wide")
+st.set_page_config(page_title="StudyBot Pro", page_icon="🎓", layout="wide")
 
-# --- SIDEBAR: SETTINGS ---
-st.sidebar.title("⚙️ Settings")
-api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
-
-# --- MAIN PAGE ---
-st.title("📚 StudyBot: The AI Maxxer")
-st.write("Upload your course materials and your past questions. The AI will find the answers strictly from your notes.")
-
-# --- STEP 1: UPLOAD MATERIALS ---
-st.header("1. Upload Study Materials (PDFs)")
-uploaded_files = st.file_uploader("Drop your handouts/textbooks here", type=['pdf'], accept_multiple_files=True)
-
-# --- STEP 2: UPLOAD QUESTIONS ---
-st.header("2. Upload Past Questions")
-st.write("Upload an image of the question paper (e.g., taken with your phone).")
-question_image = st.file_uploader("Drop the question paper image here", type=['png', 'jpg', 'jpeg'])
+# --- AUTHENTICATION (The Safe Way) ---
+# We try to get the key from Streamlit Secrets.
+# If it's not there, we ask the user for it (fallback).
+try:
+    api_key = st.secrets["GEMINI_API_KEY"]
+except FileNotFoundError:
+    api_key = st.sidebar.text_input("⚠️ Admin Mode: Enter API Key", type="password")
 
 # --- LOGIC FUNCTIONS ---
-
 def extract_text_with_pages(pdf_files):
-    """Reads the PDF and keeps track of page numbers."""
     full_text = ""
     for pdf_file in pdf_files:
         pdf_reader = PyPDF2.PdfReader(pdf_file)
@@ -38,53 +29,85 @@ def extract_text_with_pages(pdf_files):
 
 def get_gemini_response(api_key, study_material, image_input):
     genai.configure(api_key=api_key)
-    
-    # This prints available models to your Command Prompt (Black Window) for debugging
-    print("Listing available models...")
-    for m in genai.list_models():
-        if 'generateContent' in m.supported_generation_methods:
-            print(m.name)
-
-    # We try to use the Flash model. 
-    # Note: We are using the generic 'gemini-2.5-flash' which is the current standard.
+    # Using Flash for speed and long context
     model = genai.GenerativeModel('gemini-2.5-flash')
 
     prompt = """
-    You are a strict, academic teaching assistant for a Nigerian University student.
+    You are an expert academic tutor.
     
-    Your Task:
-    1. Analyze the attached image of the exam questions.
-    2. Read the provided Study Material text below.
-    3. For EACH question found in the image, write a Theory/Essay style answer.
+    TASK:
+    1. Analyze the exam questions in the image.
+    2. Answer them using ONLY the provided Study Material.
+    3. For every answer, you MUST cite the (Source, Page Number).
+    4. If the answer is not in the material, state "Not found in provided notes."
     
-    CRITICAL RULES:
-    - You must ONLY use the information provided in the "Study Material" text.
-    - If the answer is found, you must cite the Source and Page Number at the end of the answer.
-    - If the answer is NOT found in the text, write "NOT FOUND IN PROVIDED MATERIALS" in bold. Do not attempt to guess or use outside knowledge.
-    - Be concise but detailed enough for a university exam.
+    FORMAT:
+    Question 1: [Question Text]
+    Answer: [Detailed Answer]
+    📍 Citation: [Source, Page X]
     
     Study Material:
     """
     
-    response = model.generate_content([prompt + study_material, image_input])
-    return response.text
+    # Error handling for limits
+    try:
+        response = model.generate_content([prompt + study_material, image_input])
+        return response.text
+    except Exception as e:
+        if "429" in str(e):
+            return "⚠️ SERVER BUSY: Too many students are studying right now. Please wait 1 minute and try again."
+        else:
+            return f"Error: {e}"
 
-# --- THE "GO" BUTTON ---
-if st.button("Generate Answers"):
-    if not api_key:
-        st.error("Please enter your API Key in the sidebar!")
-    elif not uploaded_files:
-        st.error("Please upload study materials!")
-    elif not question_image:
-        st.error("Please upload a question paper!")
-    else:
-        with st.spinner("Reading textbooks and analyzing questions... (This might take a moment)"):
-            try:
-                study_text = extract_text_with_pages(uploaded_files)
-                image = Image.open(question_image)
-                answer_sheet = get_gemini_response(api_key, study_text, image)
-                st.success("Done! Here are your answers:")
-                st.markdown(answer_sheet)
+# --- UI ---
+st.title("🎓 StudyBot: Automate Your Revision")
+st.markdown("Upload your handouts + Past Questions -> Get a Cited Answer Sheet.")
+
+# Use Session State to remember the result so it doesn't vanish
+if 'answer_sheet' not in st.session_state:
+    st.session_state['answer_sheet'] = None
+
+col1, col2 = st.columns([1, 1])
+
+with col1:
+    st.subheader("1. Your Materials")
+    uploaded_files = st.file_uploader("Upload Handouts (PDF)", type=['pdf'], accept_multiple_files=True)
+    
+    st.subheader("2. The Exam")
+    question_image = st.file_uploader("Upload Question Paper (Image)", type=['png', 'jpg', 'jpeg'])
+    
+    generate_btn = st.button("🚀 Generate Cheat Sheet", type="primary", use_container_width=True)
+
+with col2:
+    st.subheader("3. The Answers")
+    
+    if generate_btn:
+        if not api_key:
+            st.error("API Key missing. Contact Admin.")
+        elif not uploaded_files or not question_image:
+            st.warning("Please upload both handouts and questions.")
+        else:
+            with st.spinner("Analyzing text... (This takes about 15-30 seconds)"):
+                # 1. Process PDFs
+                raw_text = extract_text_with_pages(uploaded_files)
+                # 2. Process Image
+                img = Image.open(question_image)
+                # 3. AI Magic
+                result = get_gemini_response(api_key, raw_text, img)
                 
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
+                # Save to session state
+                st.session_state['answer_sheet'] = result
+                st.rerun() # Refresh to show result
+
+    # Display the result if it exists in memory
+    if st.session_state['answer_sheet']:
+        st.markdown(st.session_state['answer_sheet'])
+        
+        # DOWNLOAD BUTTON
+        st.download_button(
+            label="📥 Download Answer Sheet (.txt)",
+            data=st.session_state['answer_sheet'],
+            file_name="studybot_answers.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
