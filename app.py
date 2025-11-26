@@ -76,7 +76,7 @@ def get_gemini_response(api_key, study_material, image_input):
     FORMAT:
     Question 1: [Question Text]
     Answer: [Detailed Answer]
-    📍 Citation: [Source, Page/Slide X]
+    Source: [Source, Page/Slide X]
     
     Study Material:
     """
@@ -147,4 +147,5 @@ with col2:
             mime="text/plain",
             use_container_width=True
         )
+
 
