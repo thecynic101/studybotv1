@@ -62,7 +62,7 @@ def extract_text_from_files(uploaded_files):
 
 def get_gemini_response(api_key, study_material, image_input):
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
 
     prompt = """
     You are an expert academic tutor.
@@ -147,3 +147,4 @@ with col2:
             mime="text/plain",
             use_container_width=True
         )
+
